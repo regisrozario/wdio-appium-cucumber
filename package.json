@@ -9,11 +9,15 @@
     "test:smoke": "wdio run ./config/wdio.ios.conf.ts --cucumberOpts.tags='@smoke'",
     "test:dry-run": "wdio run ./config/wdio.ios.conf.ts --cucumberOpts.dryRun",
     "appium:explore": "appium --port 4724",
+    "appium:explore:stop": "lsof -ti tcp:4724 | xargs kill 2>/dev/null || true",
     "report": "allure generate allure-results --clean -o allure-report && allure open allure-report",
     "appium:doctor": "appium driver doctor xcuitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "sync:feature-choices": "node .github/scripts/sync-feature-choices.mjs"
   },
   "devDependencies": {
+    "@cucumber/gherkin": "^29.0.0",
+    "@cucumber/messages": "^26.0.1",
     "@types/node": "^26.6.6",
     "@wdio/allure-reporter": "^9.32.0",
     "@wdio/appium-service": "^9.32.0",

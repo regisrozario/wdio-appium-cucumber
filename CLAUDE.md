@@ -11,6 +11,7 @@ Mobile UI tests for **Sauce Labs My Demo App (iOS)** with WebdriverIO 9, Appium 
 | `npm run test:dry-run` | Cucumber dry run; undefined steps print `Step "..." is not defined` |
 | `npm run typecheck` | TypeScript check |
 | `npm run appium:explore` | Appium on port **4724** for Appium MCP exploration |
+| `npm run appium:explore:stop` | Stop the port-4724 exploration server |
 
 ## Layout
 
@@ -46,6 +47,6 @@ Mobile UI tests for **Sauce Labs My Demo App (iOS)** with WebdriverIO 9, Appium 
    Don't call `select_device` or `prepare_ios_simulator`.
 3. Explore with `appium_get_page_source`, `generate_locators`, `appium_find_element`, `appium_gesture`, `appium_alert`, `appium_app_lifecycle` (use `clear` + `activate` to start fresh).
 4. Write the code yourself following the conventions above. **Don't use `appium_generate_tests`**; it emits Java/TestNG.
-5. Delete the MCP session and stop the port-4724 server before running `npm test`.
+5. Delete the MCP session and stop the exploration server (`npm run appium:explore:stop`) before running `npm test`.
 
 Use `/implement-feature <feature file>` to run the whole loop.
