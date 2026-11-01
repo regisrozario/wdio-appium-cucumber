@@ -21,3 +21,14 @@ Feature: Shopping cart
     When I remove "Sauce Labs Backpack - Black" from the cart
     Then the cart should not list "Sauce Labs Backpack - Black"
     And the cart should be empty
+  
+  @smoke
+  Scenario: Add multiple products to the cart
+    When I open the product "Sauce Labs Backpack - Black"
+    And I add the product to the cart
+    When I open the product "Sauce Labs Bolt T-Shirt - Red"
+    And I add the product to the cart
+    And I open the "Cart" tab
+    Then the cart should contain 2 items
+    And the cart should list "Sauce Labs Backpack - Black"
+    And the cart should list "Sauce Labs Bolt T-Shirt - Red"

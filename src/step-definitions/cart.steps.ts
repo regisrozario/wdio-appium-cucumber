@@ -6,6 +6,11 @@ import ProductDetailsScreen from '../pageobjects/product-details.screen.ts';
 import CartScreen from '../pageobjects/cart.screen.ts';
 
 async function openProduct(name: string) {
+    // Products can be opened from any screen; the Catalog tab returns to the top of the catalog
+    if (!(await CatalogScreen.isShown())) {
+        await TabBar.openTab('Catalog');
+        await CatalogScreen.waitForIsShown();
+    }
     await CatalogScreen.openProduct(name);
     await ProductDetailsScreen.waitForIsShown();
     await expect(ProductDetailsScreen.title(name)).toBeDisplayed();

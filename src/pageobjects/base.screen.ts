@@ -14,4 +14,8 @@ export default abstract class BaseScreen {
     async waitForIsShown(isShown = true): Promise<boolean | void> {
         return this.screen.waitForDisplayed({ timeout: 30000, reverse: !isShown });
     }
+
+    async isShown(): Promise<boolean> {
+        return this.screen.isDisplayed();
+    }
 }
