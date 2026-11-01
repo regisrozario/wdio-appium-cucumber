@@ -41,12 +41,12 @@ Mobile UI tests for **Sauce Labs My Demo App (iOS)** with WebdriverIO 9, Appium 
 
 `.mcp.json` registers `appium-mcp`, used to explore the app while writing tests. It must use **remote mode** against this project's Appium, because its embedded driver doesn't build on this Mac:
 
-1. Start the exploration server in the background: `npm run appium:explore` (port 4724).
+1. Start the exploration server in the background: `npm run appium:explore` (port 4724). In the CI workflow it's already running; use it and don't start or stop it.
 2. Create a session with `appium_session_management`: `action=create`, `platform=ios`, `remoteServerUrl=http://127.0.0.1:4724`, capabilities
    `{"appium:automationName":"XCUITest","appium:deviceName":"iPhone 14","appium:bundleId":"com.saucelabs.mydemo.app.ios"}`.
    Don't call `select_device` or `prepare_ios_simulator`.
 3. Explore with `appium_get_page_source`, `generate_locators`, `appium_find_element`, `appium_gesture`, `appium_alert`, `appium_app_lifecycle` (use `clear` + `activate` to start fresh).
 4. Write the code yourself following the conventions above. **Don't use `appium_generate_tests`**; it emits Java/TestNG.
-5. Delete the MCP session and stop the exploration server (`npm run appium:explore:stop`) before running `npm test`.
+5. Delete the MCP session and, if you started it, stop the exploration server (`npm run appium:explore:stop`) before running `npm test`. Never leave a background command running: a non-interactive `claude -p` run waits for it and never exits.
 
 Use `/implement-feature <feature file>` to run the whole loop.

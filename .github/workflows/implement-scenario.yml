@@ -92,10 +92,28 @@ jobs:
           # Keep a copy so we can check the AI didn't change the human-written scenario
           cp "$FEATURE_FILE" "$RUNNER_TEMP/expected.feature"
 
+      # The workflow owns the exploration server, so Claude never has to start or stop it
+      - name: Start exploration Appium
+        run: |
+          nohup npm run appium:explore > "$RUNNER_TEMP/appium-explore.log" 2>&1 &
+          for i in $(seq 1 60); do
+            curl -s http://127.0.0.1:4724/status | grep -q '"ready":true' && { echo "Appium ready on port 4724"; exit 0; }
+            sleep 2
+          done
+          echo "::error::The exploration Appium server didn't start; see appium-explore.log in the claude-output artifact."
+          exit 1
+
       - name: Implement with Claude Code
+        timeout-minutes: 45
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           SCENARIO_NAME: ${{ steps.scenario.outputs.scenario_name }}
+          SCENARIO_LINE: ${{ steps.scenario.outputs.scenario_line }}
+          # Unattended, Claude Code waits for background commands before exiting, so allow none,
+          # and give foreground commands (a full test run takes several minutes) room to finish
+          CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1'
+          BASH_DEFAULT_TIMEOUT_MS: '900000'
+          BASH_MAX_TIMEOUT_MS: '1800000'
         run: |
           if [ -z "$ANTHROPIC_API_KEY" ]; then
             echo "::error::Add an ANTHROPIC_API_KEY repository secret (Settings → Secrets and variables → Actions)."
@@ -107,7 +125,10 @@ jobs:
           - The feature file was written by a human and has already been updated; don't change it.
           - If a step is ambiguous, refers to something that doesn't exist in the app, or can't be automated, don't guess or work around it: stop and explain why.
           - Don't commit or push; the workflow does that after verifying your changes.
-          End your final message with exactly one line, either 'RESULT: SUCCESS' or 'RESULT: BLOCKED - <one-line reason>'."
+          - The exploration Appium server is already running on port 4724 (the workflow started it). Use it; don't start or stop Appium.
+          - Run every command in the foreground.
+          - To check your work, run only the new scenario: npx wdio run ./config/wdio.ios.conf.ts --spec ./$FEATURE_FILE:$SCENARIO_LINE (don't run the full suite).
+          When you're done, use the Write tool to save your report to .ai-result.md in the repository root: a short summary of the steps, page objects and selectors you added or reused and the test results, ending with exactly one line, either 'RESULT: SUCCESS' or 'RESULT: BLOCKED - <one-line reason>'."
 
           claude -p "$PROMPT" \
             --mcp-config .mcp.json --strict-mcp-config \
@@ -115,9 +136,9 @@ jobs:
             --allowedTools \
               "Read" "Glob" "Grep" "Edit" "Write" "Skill" "TodoWrite" \
               "mcp__appium-mcp" \
-              "Bash(npm run test:dry-run:*)" "Bash(npm run typecheck:*)" "Bash(npm test:*)" \
+              "Bash(npm run test:dry-run:*)" "Bash(npm run typecheck:*)" \
               "Bash(npx wdio run:*)" \
-              "Bash(npm run appium:explore:*)" "Bash(curl -s http://127.0.0.1:4724/status:*)" \
+              "Bash(curl -s http://127.0.0.1:4724/status:*)" \
               "Bash(git status:*)" "Bash(git diff:*)" \
             --output-format json > "$RUNNER_TEMP/claude.json" || true
 
@@ -130,7 +151,10 @@ jobs:
           try { out = JSON.parse(fs.readFileSync(file, 'utf8')); }
           catch { console.log('::error::Claude Code produced no result; see the claude-output artifact.'); process.exit(1); }
 
-          const text = (out.result ?? '').trim();
+          // Prefer the report file: late messages can't overwrite it the way they can the final reply
+          const reportFile = '.ai-result.md';
+          const text = (fs.existsSync(reportFile) ? fs.readFileSync(reportFile, 'utf8') : (out.result ?? '')).trim();
+          fs.rmSync(reportFile, { force: true });
           // Last non-empty line, ignoring markdown emphasis such as **RESULT: SUCCESS**
           const verdict = (text.split('\n').filter((l) => l.trim()).pop() ?? '').replace(/[*_`]/g, '').trim();
           const denied = [...new Set((out.permission_denials ?? []).map((d) => d.tool_name))];
@@ -165,20 +189,29 @@ jobs:
           fi
           git status --short
 
-      - name: Verify type check and full test suite
+      # Only the new scenario is verified, twice in a row; the full suite runs after merge to main
+      - name: Verify type check and the new scenario (2 runs)
         id: verify
+        env:
+          SCENARIO_LINE: ${{ steps.scenario.outputs.scenario_line }}
         run: |
           npm run typecheck
-          # Start from clean results so the evidence only reflects this verification run
+          # Start from clean results so the evidence only reflects these runs
           rm -rf allure-results
-          npm test
+          for run in 1 2; do
+            echo "::group::Run $run of 2: $FEATURE_FILE:$SCENARIO_LINE"
+            npx wdio run ./config/wdio.ios.conf.ts --spec "./$FEATURE_FILE:$SCENARIO_LINE"
+            echo "::endgroup::"
+          done
 
       # Runs even if the tests failed, so the run summary shows which steps failed.
-      # Also fails unless the new scenario ran and every one of its steps passed.
+      # Also fails unless the new scenario passed in both runs with every step passed.
       - name: Build test plan from results
         if: always() && steps.verify.outcome != 'skipped'
         env:
           SCENARIO_NAME: ${{ steps.scenario.outputs.scenario_name }}
+          SCENARIO_LINE: ${{ steps.scenario.outputs.scenario_line }}
+          REQUIRED_RUNS: '2'
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           EVIDENCE_FILE: ${{ runner.temp }}/test-plan.md
         run: node .github/scripts/test-evidence.mjs

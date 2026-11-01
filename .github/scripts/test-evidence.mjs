@@ -1,53 +1,53 @@
 #!/usr/bin/env node
 /**
- * Builds the pull request's "Test plan" from the Allure results of the verification run,
- * and fails unless the new scenario ran and every one of its steps passed.
+ * Builds the pull request's "Test plan" from the Allure results of the verification runs,
+ * and fails unless the new scenario passed in every one of the required runs, with every step passed.
  *
- * Input (env):  SCENARIO_NAME, FEATURE_FILE, RUN_URL (optional), ALLURE_DIR (default allure-results)
+ * Input (env):  SCENARIO_NAME, FEATURE_FILE, SCENARIO_LINE (optional), REQUIRED_RUNS (default 2),
+ *               RUN_URL (optional), ALLURE_DIR (default allure-results),
  *               EVIDENCE_FILE: where to write the markdown (default test-plan.md)
- * Exit code:    0 when the new scenario passed in full and nothing else failed, 1 otherwise.
+ * Exit code:    0 when the new scenario passed in all required runs, 1 otherwise.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 
-const { SCENARIO_NAME, FEATURE_FILE, RUN_URL } = process.env;
+const { SCENARIO_NAME, FEATURE_FILE, SCENARIO_LINE, RUN_URL } = process.env;
+const REQUIRED_RUNS = Number(process.env.REQUIRED_RUNS ?? 2);
 const ALLURE_DIR = process.env.ALLURE_DIR ?? 'allure-results';
 const EVIDENCE_FILE = process.env.EVIDENCE_FILE ?? 'test-plan.md';
 
 const ICON = { passed: '✅', failed: '❌', broken: '❌', skipped: '⏭️', pending: '⏸️', unknown: '❔' };
-const icon = (status) => ICON[status] ?? '❔';
+const icon = (status) => `${ICON[status] ?? '❔'} ${status}`;
 const seconds = (r) => `${((r.stop - r.start) / 1000).toFixed(1)} s`;
 const escape = (s) => s.replace(/\|/g, '\\|');
+const fullyPassed = (r) => r.status === 'passed' && r.steps?.length > 0 && r.steps.every((s) => s.status === 'passed');
 
-// Latest result per scenario (the directory can hold older runs)
-const latest = new Map();
+// Every run of the new scenario, oldest first
 const files = fs.existsSync(ALLURE_DIR) ? fs.readdirSync(ALLURE_DIR).filter((f) => f.endsWith('-result.json')) : [];
-for (const f of files) {
-    const r = JSON.parse(fs.readFileSync(path.join(ALLURE_DIR, f), 'utf8'));
-    const prev = latest.get(r.fullName);
-    if (!prev || r.stop > prev.stop) latest.set(r.fullName, r);
-}
-const results = [...latest.values()].sort((a, b) => a.fullName.localeCompare(b.fullName));
+const runs = files
+    .map((f) => JSON.parse(fs.readFileSync(path.join(ALLURE_DIR, f), 'utf8')))
+    .filter((r) => r.fullName.split('#')[0] === FEATURE_FILE && r.name === SCENARIO_NAME)
+    .sort((a, b) => a.start - b.start);
 
-const fileOf = (r) => r.fullName.split('#')[0];
-const target = results.find((r) => fileOf(r) === FEATURE_FILE && r.name === SCENARIO_NAME);
-const steps = target?.steps ?? [];
+const passedRuns = runs.filter(fullyPassed).length;
 const problems = [];
-
-if (!target) {
+if (!runs.length) {
     problems.push(`The new scenario "${SCENARIO_NAME}" from ${FEATURE_FILE} was not found in the test results, so it didn't run.`);
-} else {
-    if (target.status !== 'passed') problems.push(`The new scenario finished as "${target.status}".`);
-    if (!steps.length) problems.push('The new scenario has no recorded steps.');
-    const notPassed = steps.filter((s) => s.status !== 'passed');
-    if (notPassed.length) problems.push(`Not every step passed: ${notPassed.map((s) => `"${s.name}" (${s.status})`).join(', ')}.`);
 }
-const failedOthers = results.filter((r) => r !== target && r.status !== 'passed');
-if (failedOthers.length) problems.push(`Other scenarios didn't pass: ${failedOthers.map((r) => `"${r.name}" (${r.status})`).join(', ')}.`);
-if (!results.length) problems.push(`No test results found in ${ALLURE_DIR}.`);
+runs.forEach((r, i) => {
+    if (fullyPassed(r)) return;
+    const bad = (r.steps ?? []).filter((s) => s.status !== 'passed').map((s) => `"${s.name}" (${s.status})`);
+    problems.push(`Run ${i + 1} finished as "${r.status}"${bad.length ? `; steps not passed: ${bad.join(', ')}` : ''}.`);
+});
+if (runs.length && runs.length < REQUIRED_RUNS) {
+    problems.push(`Only ${runs.length} of ${REQUIRED_RUNS} required runs took place.`);
+}
+const ok = problems.length === 0 && passedRuns >= REQUIRED_RUNS;
 
-const passedCount = results.filter((r) => r.status === 'passed').length;
-const ok = problems.length === 0;
+// One row per step, one column per run
+const stepNames = runs[0]?.steps?.map((s) => s.name) ?? [];
+const runHeaders = runs.map((_, i) => `Run ${i + 1}`);
+const spec = `${FEATURE_FILE}${SCENARIO_LINE ? `:${SCENARIO_LINE}` : ''}`;
 
 const md = [
     '## Test plan',
@@ -55,22 +55,20 @@ const md = [
     `- [x] Scenario text in \`${FEATURE_FILE}\` is unchanged from the workflow input`,
     '- [x] Only step definitions, page objects, the feature file and `CLAUDE.md` were changed',
     '- [x] Type check passed (`npm run typecheck`)',
-    `- [${target && target.status === 'passed' && steps.length && steps.every((s) => s.status === 'passed') ? 'x' : ' '}] New scenario **${SCENARIO_NAME}** ran and all ${steps.length} steps passed`,
-    `- [${failedOthers.length ? ' ' : 'x'}] Full suite passed: ${passedCount}/${results.length} scenarios (\`npm test\` on the iOS simulator)`,
+    `- [${ok ? 'x' : ' '}] New scenario **${SCENARIO_NAME}** passed ${passedRuns} of ${REQUIRED_RUNS} consecutive runs, every step passed (\`--spec ${spec}\` on the iOS simulator)`,
     '',
-    `### New scenario: ${SCENARIO_NAME}${target ? ` (${seconds(target)})` : ''}`,
+    `### New scenario: ${SCENARIO_NAME}`,
     '',
-    ...(steps.length
-        ? ['| Step | Result |', '|---|---|', ...steps.map((s) => `| ${escape(s.name)} | ${icon(s.status)} ${s.status} |`)]
-        : ['_No step results recorded._']),
+    ...(runs.length
+        ? [
+            `| Step | ${runHeaders.join(' | ')} |`,
+            `|---|${runHeaders.map(() => '---|').join('')}`,
+            ...stepNames.map((name, i) => `| ${escape(name)} | ${runs.map((r) => icon(r.steps?.[i]?.status ?? 'unknown')).join(' | ')} |`),
+            `| **Duration** | ${runs.map(seconds).join(' | ')} |`,
+        ]
+        : ['_No results recorded for the new scenario._']),
     '',
-    '<details><summary>Full suite results</summary>',
-    '',
-    '| Feature file | Scenario | Result | Time |',
-    '|---|---|---|---|',
-    ...results.map((r) => `| \`${fileOf(r)}\` | ${escape(r.name)}${r === target ? ' 🆕' : ''} | ${icon(r.status)} ${r.status} | ${seconds(r)} |`),
-    '',
-    '</details>',
+    'Only the new scenario was run here. The full suite runs in **Mobile tests (iOS)** when this is merged to `main`.',
     '',
     ...(RUN_URL ? [`Evidence: [workflow run](${RUN_URL}), with Allure results and Appium/WebdriverIO logs in the **claude-output** artifact.`] : []),
     ...(ok ? [] : ['', '### ❌ Verification failed', '', ...problems.map((p) => `- ${p}`)]),

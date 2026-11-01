@@ -17,7 +17,7 @@ Read `CLAUDE.md` first; its conventions and known limitations apply throughout.
 - If nothing is undefined, skip to step 5.
 
 ## 3. Explore the app with Appium MCP
-- Start `npm run appium:explore` in the background and wait until `curl -s http://127.0.0.1:4724/status` reports `"ready":true`.
+- If `curl -s http://127.0.0.1:4724/status` already reports `"ready":true` (the CI workflow starts it for you), use that server and don't start or stop it. Otherwise start `npm run appium:explore` in the background and wait until it reports ready.
 - Create a remote iOS session exactly as described in `CLAUDE.md` (port 4724, iPhone 14, bundle id). Reset the app with `appium_app_lifecycle` (`clear`, then `activate`).
 - Walk each scenario by hand in order, including the steps that already exist, so the app reaches the right state.
 - On every new screen, call `generate_locators` and/or `appium_get_page_source` and note:
@@ -33,9 +33,9 @@ Read `CLAUDE.md` first; its conventions and known limitations apply throughout.
 - Run `npm run typecheck`.
 
 ## 5. Run and fix
-- Delete the MCP session and stop the exploration server with `npm run appium:explore:stop` (`npm test` starts its own Appium on 4723).
+- Delete the MCP session. If you started the exploration server, stop it now with `npm run appium:explore:stop`; a forgotten background server keeps a non-interactive run from ever exiting. (`npm test` starts its own Appium on 4723.)
 - Run `npx wdio run ./config/wdio.ios.conf.ts --spec <feature>`. On failure, read the error, re-explore with MCP if a selector or flow is wrong, fix, and re-run. Don't loosen an assertion just to make it pass; if the app behaves differently from the feature, report it.
-- Finish by running the full suite (`npm test`) to check nothing else broke.
+- Finish by running the full suite (`npm test`) to check nothing else broke, unless your instructions say to run only the new scenario (the CI workflow does: it verifies `--spec <feature>:<line>` twice and leaves the full suite to the regression run after merge).
 
 ## 6. Report
 Summarise: the steps added or reused, the new or changed page objects and the selectors chosen, the test results, and anything you couldn't automate and why. Don't commit unless asked.

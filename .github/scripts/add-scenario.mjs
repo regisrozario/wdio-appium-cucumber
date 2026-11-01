@@ -5,7 +5,7 @@
  *
  * Input (env):  SCENARIO      e.g. "@smoke Scenario: Sort by price | Given … | When … | Then …"
  *               FEATURE_FILE  e.g. "features/catalog-sort.feature"
- * Output:       GITHUB_OUTPUT keys scenario_name, created; exits non-zero with a message on bad input.
+ * Output:       GITHUB_OUTPUT keys scenario_name, scenario_line, created; exits non-zero with a message on bad input.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -80,8 +80,11 @@ try {
 }
 
 fs.writeFileSync(featureFile, content);
-console.log(`${exists ? 'Added scenario to' : 'Created'} ${featureFile}:\n\n${block}`);
+
+// 1-based line of the "Scenario:" keyword, so the scenario can be run on its own (--spec file:line)
+const scenarioLine = content.split('\n').findIndex((l) => l.trim() === `Scenario: ${scenarioName}`) + 1;
+console.log(`${exists ? 'Added scenario to' : 'Created'} ${featureFile} (line ${scenarioLine}):\n\n${block}`);
 
 if (process.env.GITHUB_OUTPUT) {
-    fs.appendFileSync(process.env.GITHUB_OUTPUT, `scenario_name=${scenarioName}\ncreated=${!exists}\n`);
+    fs.appendFileSync(process.env.GITHUB_OUTPUT, `scenario_name=${scenarioName}\nscenario_line=${scenarioLine}\ncreated=${!exists}\n`);
 }
