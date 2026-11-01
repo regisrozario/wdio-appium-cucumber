@@ -1,16 +1,18 @@
 #!/usr/bin/env node
 /**
  * Adds a scenario, given on one line with steps separated by " | ", to a feature file
- * (creating the file if needed), then checks the result is valid Gherkin.
+ * (creating the file if needed), after a BDD review (see scenario-lint.mjs) and a Gherkin syntax check.
  *
  * Input (env):  SCENARIO      e.g. "@smoke Scenario: Sort by price | Given … | When … | Then …"
  *               FEATURE_FILE  e.g. "features/catalog-sort.feature"
+ *               REVIEW_FILE   optional: where to write the review as markdown, for the pull request
  * Output:       GITHUB_OUTPUT keys scenario_name, scenario_line, created; exits non-zero with a message on bad input.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { AstBuilder, GherkinClassicTokenMatcher, Parser } from '@cucumber/gherkin';
 import { IdGenerator } from '@cucumber/messages';
+import { lintScenario, loadStepDefinitions } from './scenario-lint.mjs';
 
 const fail = (message) => {
     console.error(`::error::${message}`);
@@ -28,6 +30,7 @@ if (!scenarioInput) fail('Scenario is empty.');
 // Split "@tag Scenario: X | Given a | When b | Then c" into Gherkin lines
 const segments = scenarioInput.split(/\s+\|\s+/).map((s) => s.trim()).filter(Boolean);
 const lines = [];
+const steps = [];
 let scenarioName;
 let sawWhen = false;
 let sawThen = false;
@@ -51,11 +54,33 @@ for (const segment of segments) {
     if (!scenarioName) fail('The scenario must start with "Scenario: <name>" (optionally preceded by tags such as @smoke).');
     if (step[1] === 'When') sawWhen = true;
     if (step[1] === 'Then') sawThen = true;
+    steps.push({ keyword: step[1], text: segment.slice(step[1].length).trim() });
     lines.push(`    ${segment}`);
 }
 
 if (!scenarioName) fail('Missing "Scenario: <name>".');
 if (!sawWhen || !sawThen) fail('The scenario needs at least one "When" and one "Then" step.');
+
+// BDD review: errors stop here, before anything is written; warnings are reported and the run continues
+const review = lintScenario({ name: scenarioName, steps }, loadStepDefinitions());
+const reviewMd = [
+    '## Scenario review',
+    '',
+    ...review.errors.map((e) => `- ❌ ${e}`),
+    ...review.warnings.map((w) => `- ⚠️ ${w}`),
+    ...(review.errors.length || review.warnings.length ? [] : ['- ✅ Follows the BDD checks (Given → When → Then, intent-level wording, no duplicate steps).']),
+    `- Reuses ${review.reused.length} existing step(s); ${review.fresh.length} new step(s) to implement${review.fresh.length ? ':' : '.'}`,
+    ...review.fresh.map((s) => `  - ${s.text}`),
+    '',
+].join('\n');
+console.log(reviewMd);
+if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `\n${reviewMd}`);
+if (process.env.REVIEW_FILE) fs.writeFileSync(process.env.REVIEW_FILE, reviewMd);
+for (const w of review.warnings) console.log(`::warning::${w}`);
+if (review.errors.length) {
+    for (const e of review.errors.slice(0, -1)) console.error(`::error::${e}`);
+    fail(review.errors.at(-1));
+}
 
 // Append to the feature file, or create it with a header derived from the file name
 const block = lines.join('\n') + '\n';

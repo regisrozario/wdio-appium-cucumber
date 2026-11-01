@@ -51,12 +51,3 @@ Then('the cart should be empty', async () => {
     await expect(CartScreen.emptyCartMessage).toBeDisplayed();
     await expect(CartScreen.goShoppingButton).toBeDisplayed();
 });
-
-When('click on Remove items', async () => {
-    await CartScreen.removeFirstItem();
-});
-
-Then('cart is empty', async () => {
-    await expect(CartScreen.emptyCartMessage).toBeDisplayed();
-    await expect(CartScreen.goShoppingButton).toBeDisplayed();
-});

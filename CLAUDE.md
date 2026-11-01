@@ -15,7 +15,7 @@ Mobile UI tests for **Sauce Labs My Demo App (iOS)** with WebdriverIO 9, Appium 
 
 ## Layout
 
-- `features/*.feature` — Gherkin, written by humans. Don't rewrite scenarios to fit the code; ask instead.
+- `features/*.feature` — Gherkin, written by humans. Don't rewrite scenarios to fit the code; ask instead. One behaviour per scenario (Given → When → Then), steps in the user's words ("I remove … from the cart", not "click Remove"), reusing existing step wording. The AI workflow enforces this before implementing (`.github/scripts/scenario-lint.mjs`).
 - `src/step-definitions/*.steps.ts` — one file per area (`app`, `cart`, `checkout`, …).
 - `src/pageobjects/*.ts` — one page object per screen, exported as a singleton (`export default new XScreen()`).
 - `config/wdio.shared.conf.ts` — framework, reporters, Appium service. `config/wdio.ios.conf.ts` — capabilities and the `beforeScenario` reset (terminate → `mobile: clearApp` → activate), so every scenario starts on the catalog with an empty cart.
