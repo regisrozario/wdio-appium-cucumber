@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "types": ["node", "@wdio/globals/types", "@wdio/cucumber-framework", "@wdio/appium-service"]
+  },
+  "include": ["config/**/*.ts", "src/**/*.ts"]
+}
