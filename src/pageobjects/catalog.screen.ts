@@ -1,4 +1,4 @@
-import { driver } from '@wdio/globals';
+import { $, driver } from '@wdio/globals';
 import BaseScreen from './base.screen.ts';
 
 class CatalogScreen extends BaseScreen {
@@ -24,6 +24,17 @@ class CatalogScreen extends BaseScreen {
             await driver.execute('mobile: scroll', { elementId: await this.productGrid.elementId, direction: 'down' });
         }
         await this.product(name).click();
+    }
+
+    /** Opens the sort/filter sheet */
+    async openSortMenu(): Promise<void> {
+        await this.screen.$('~Button').click();
+    }
+
+    /** Returns a sort option button by its label (e.g. 'Price - Descending').
+     *  The sort sheet is rendered outside the Catalog-screen subtree, so we use a global query. */
+    sortOption(label: string) {
+        return $(`~${label}`);
     }
 }
 
