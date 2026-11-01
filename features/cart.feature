@@ -46,5 +46,5 @@ Feature: Shopping cart
     And I add the product to the cart
     And I open the "Cart" tab
     Then the cart should contain 1 item
-    When click on Remove items
-    Then cart is empty
+    When I remove "Sauce Labs Bike Light" from the cart
+    Then the cart should be empty

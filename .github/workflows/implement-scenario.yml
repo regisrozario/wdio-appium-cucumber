@@ -85,8 +85,11 @@ jobs:
       - name: Install Claude Code
         run: npm install -g @anthropic-ai/claude-code@2.1.81
 
+      # Reviews the scenario against BDD rules first: errors stop the run before any AI time is spent
       - name: Add scenario to feature file
         id: scenario
+        env:
+          REVIEW_FILE: ${{ runner.temp }}/scenario-review.md
         run: |
           node .github/scripts/add-scenario.mjs
           # Keep a copy so we can check the AI didn't change the human-written scenario
@@ -245,6 +248,7 @@ jobs:
             const summary = fs.readFileSync(`${RUNNER_TEMP}/claude-summary.md`, 'utf8');
             const scenario = fs.readFileSync(`${RUNNER_TEMP}/expected.feature`, 'utf8');
             const testPlan = fs.readFileSync(`${RUNNER_TEMP}/test-plan.md`, 'utf8');
+            const review = fs.readFileSync(`${RUNNER_TEMP}/scenario-review.md`, 'utf8');
             const { data: pr } = await github.rest.pulls.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -258,6 +262,8 @@ jobs:
                 '<details><summary>Feature file</summary>', '', '```gherkin', scenario.trim(), '```', '</details>',
                 '',
                 testPlan.trim(),
+                '',
+                review.trim(),
                 '',
                 '## Claude Code summary', '', summary,
                 '',
@@ -279,6 +285,7 @@ jobs:
           path: |
             ${{ runner.temp }}/claude.json
             ${{ runner.temp }}/test-plan.md
+            ${{ runner.temp }}/scenario-review.md
             logs
             allure-results
           if-no-files-found: ignore

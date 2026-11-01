@@ -16,6 +16,7 @@
     "sync:feature-choices": "node .github/scripts/sync-feature-choices.mjs"
   },
   "devDependencies": {
+    "@cucumber/cucumber-expressions": "^17.1.0",
     "@cucumber/gherkin": "^29.0.0",
     "@cucumber/messages": "^26.0.1",
     "@types/node": "^26.6.6",
