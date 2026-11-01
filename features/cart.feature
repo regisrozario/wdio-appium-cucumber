@@ -48,3 +48,10 @@ Feature: Shopping cart
     Then the cart should contain 1 item
     When click on Remove items
     Then cart is empty
+
+  @smoke
+  Scenario: Verify sort by price works
+    When User click on sort option
+    Then different sorting options displayed like name and price
+    And user click on sort by price Descending
+    Then make sure items are sorted properly
