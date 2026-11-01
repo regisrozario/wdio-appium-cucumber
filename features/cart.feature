@@ -32,3 +32,10 @@ Feature: Shopping cart
     Then the cart should contain 2 items
     And the cart should list "Sauce Labs Backpack - Black"
     And the cart should list "Sauce Labs Bolt T-Shirt - Red"
+
+  @smoke
+  Scenario: Add the bike light
+    When I open the product "Sauce Labs Bike Light"
+    And I add the product to the cart
+    And I open the "Cart" tab
+    Then the cart should contain 1 item
