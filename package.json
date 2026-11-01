@@ -7,6 +7,8 @@
   "scripts": {
     "test": "wdio run ./config/wdio.ios.conf.ts",
     "test:smoke": "wdio run ./config/wdio.ios.conf.ts --cucumberOpts.tags='@smoke'",
+    "test:dry-run": "wdio run ./config/wdio.ios.conf.ts --cucumberOpts.dryRun",
+    "appium:explore": "appium --port 4724",
     "report": "allure generate allure-results --clean -o allure-report && allure open allure-report",
     "appium:doctor": "appium driver doctor xcuitest",
     "typecheck": "tsc --noEmit"

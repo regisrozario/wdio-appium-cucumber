@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "appium-mcp": {
+      "command": "npx",
+      "args": ["-y", "appium-mcp@1.99.2"],
+      "env": {
+        "npm_config_ignore_scripts": "true",
+        "NO_UI": "true",
+        "REMOTE_SERVER_URL_ALLOW_REGEX": "^http://(127\\.0\\.0\\.1|localhost):4724/?$"
+      }
+    }
+  }
+}
