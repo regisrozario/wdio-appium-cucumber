@@ -33,6 +33,11 @@ class CartScreen extends BaseScreen {
             .$(`-ios class chain:**/XCUIElementTypeCell[$name == "${name}"$]/**/XCUIElementTypeButton[\`name == "Remove Item"\`]`)
             .click();
     }
+
+    /** Click the first visible "Remove Item" button in the cart (use when only one item is present) */
+    async removeFirstItem(): Promise<void> {
+        await this.screen.$('~Remove Item').click();
+    }
 }
 
 export default new CartScreen();

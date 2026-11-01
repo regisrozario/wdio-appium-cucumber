@@ -39,3 +39,12 @@ Feature: Shopping cart
     And I add the product to the cart
     And I open the "Cart" tab
     Then the cart should contain 1 item
+
+  @smoke
+  Scenario: Add and Remove the bike light
+    When I open the product "Sauce Labs Bike Light"
+    And I add the product to the cart
+    And I open the "Cart" tab
+    Then the cart should contain 1 item
+    When click on Remove items
+    Then cart is empty
