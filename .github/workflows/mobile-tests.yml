@@ -1,0 +1,72 @@
+name: Mobile tests (iOS)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      tags:
+        description: 'Cucumber tag expression, e.g. @smoke or "@cart and not @wip" (empty = all)'
+        required: false
+        default: ''
+      device:
+        description: 'Simulator name'
+        required: false
+        default: 'iPhone 14'
+
+# One simulator, so never run two jobs at once
+concurrency:
+  group: ios-simulator
+  cancel-in-progress: false
+
+jobs:
+  ios:
+    # Runs on the Mac registered as a self-hosted runner, where Xcode and the simulators live
+    runs-on: [self-hosted, macOS]
+    timeout-minutes: 60
+
+    env:
+      TAGS: ${{ github.event.inputs.tags }}
+      IOS_DEVICE: ${{ github.event.inputs.device || 'iPhone 14' }}
+      # Path to the My Demo App build on the runner Mac (repo variable). If unset,
+      # the app must already be installed on the simulator.
+      IOS_APP: ${{ vars.IOS_APP_PATH }}
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Run tests
+        run: npm test
+
+      - name: Generate Allure report
+        if: always()
+        run: npx allure generate allure-results --clean -o allure-report
+
+      - name: Upload Allure report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-report
+          path: allure-report
+          if-no-files-found: ignore
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs
+          path: logs
+          if-no-files-found: ignore
