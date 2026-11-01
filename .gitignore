@@ -3,3 +3,4 @@ logs/
 allure-results/
 allure-report/
 .DS_Store
+apps/
