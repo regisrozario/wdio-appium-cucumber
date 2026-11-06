@@ -36,6 +36,12 @@ class CatalogScreen extends BaseScreen {
     sortOption(label: string) {
         return $(`~${label}`);
     }
+
+    async sortBy(label: string): Promise<void> {
+        await this.openSortMenu();
+        await this.sortOption(label).click();
+        await this.waitForIsShown();
+    }
 }
 
 export default new CatalogScreen();
