@@ -1,8 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { config as shared, ROOT } from './wdio.shared.conf.ts';
+import { config as shared, ROOT, BUNDLE_ID } from './wdio.shared.conf.ts';
 
-export const BUNDLE_ID = 'com.saucelabs.mydemo.app.ios';
+/**
+ * Runs on a local iOS simulator (needs Xcode): `npm run test:local`.
+ * The default `npm test` runs on Sauce Labs instead (wdio.sauce.conf.ts).
+ */
 
 // The app build is not checked in. Use IOS_APP, or a local copy in apps/ (git-ignored);
 // with neither, the app must already be installed on the simulator.
@@ -10,6 +13,18 @@ const APP = process.env.IOS_APP ?? path.join(ROOT, 'apps/My_Demo_App.app');
 
 export const config: WebdriverIO.Config = {
     ...shared,
+
+    // Appium server is started/stopped automatically from the local node_modules
+    services: [
+        ['appium', {
+            command: 'appium',
+            args: {
+                relaxedSecurity: true,
+                log: path.join(ROOT, 'logs/appium.log'),
+            },
+        }],
+    ],
+
     capabilities: [{
         platformName: 'iOS',
         'appium:automationName': 'XCUITest',

@@ -2,6 +2,11 @@ import path from 'node:path';
 import fs from 'node:fs';
 
 export const ROOT = path.resolve(import.meta.dirname, '..');
+export const BUNDLE_ID = 'com.saucelabs.mydemo.app.ios';
+
+// Local credentials (SAUCE_USERNAME, SAUCE_ACCESS_KEY) live in the git-ignored .env; CI sets them as secrets
+const ENV_FILE = path.join(ROOT, '.env');
+if (fs.existsSync(ENV_FILE)) process.loadEnvFile(ENV_FILE);
 
 export const config: WebdriverIO.Config = {
     runner: 'local',
@@ -9,7 +14,7 @@ export const config: WebdriverIO.Config = {
     exclude: [],
     maxInstances: 1,
 
-    // Capabilities are defined in the platform-specific configs
+    // Capabilities, services and the per-scenario reset are defined in wdio.sauce.conf.ts and wdio.local.conf.ts
     capabilities: [],
 
     logLevel: 'warn',
@@ -18,17 +23,6 @@ export const config: WebdriverIO.Config = {
     waitforTimeout: 15000,
     connectionRetryTimeout: 120000,
     connectionRetryCount: 2,
-
-    // Appium server is started/stopped automatically from the local node_modules
-    services: [
-        ['appium', {
-            command: 'appium',
-            args: {
-                relaxedSecurity: true,
-                log: path.join(ROOT, 'logs/appium.log'),
-            },
-        }],
-    ],
 
     framework: 'cucumber',
     reporters: [

@@ -26,7 +26,7 @@ on:
         required: false
         type: string
       runner:
-        description: 'Self-hosted runner label (the runner needs Xcode and the iOS simulator)'
+        description: 'Self-hosted runner label (needs Node.js; the devices are at Sauce Labs)'
         required: false
         default: 'macOS'
         type: string
@@ -35,9 +35,9 @@ permissions:
   contents: write
   pull-requests: write
 
-# Shares the simulator with the test workflow, so never run them at the same time
+# Shares the Sauce Labs device allowance with the test workflow, so never run them at the same time
 concurrency:
-  group: ios-simulator
+  group: sauce-labs
   cancel-in-progress: false
 
 jobs:
@@ -47,6 +47,8 @@ jobs:
 
     env:
       SCENARIO: ${{ inputs.scenario }}
+      SAUCE_REGION: ${{ vars.SAUCE_REGION || 'us-west-1' }}
+      SAUCE_BUILD: 'Implement scenario (AI) #${{ github.run_number }}'
 
     steps:
       - name: Resolve feature file
@@ -95,15 +97,23 @@ jobs:
           # Keep a copy so we can check the AI didn't change the human-written scenario
           cp "$FEATURE_FILE" "$RUNNER_TEMP/expected.feature"
 
-      # The workflow owns the exploration server, so Claude never has to start or stop it
-      - name: Start exploration Appium
+      # The workflow owns the Sauce Labs proxy, so Claude never starts or stops it and never sees the credentials:
+      # Appium MCP and Claude's test runs reach Sauce Labs only through http://127.0.0.1:4724
+      - name: Start Sauce Labs proxy
+        env:
+          SAUCE_USERNAME: ${{ secrets.SAUCE_USERNAME }}
+          SAUCE_ACCESS_KEY: ${{ secrets.SAUCE_ACCESS_KEY }}
         run: |
-          nohup npm run appium:explore > "$RUNNER_TEMP/appium-explore.log" 2>&1 &
-          for i in $(seq 1 60); do
-            curl -s http://127.0.0.1:4724/status | grep -q '"ready":true' && { echo "Appium ready on port 4724"; exit 0; }
-            sleep 2
+          if [ -z "$SAUCE_USERNAME" ] || [ -z "$SAUCE_ACCESS_KEY" ]; then
+            echo "::error::Add SAUCE_USERNAME and SAUCE_ACCESS_KEY repository secrets (Settings → Secrets and variables → Actions)."
+            exit 1
+          fi
+          nohup npm run explore > "$RUNNER_TEMP/sauce-proxy.log" 2>&1 &
+          for i in $(seq 1 30); do
+            curl -s http://127.0.0.1:4724/status | grep -q '"ready":true' && { echo "Sauce Labs proxy ready on port 4724"; exit 0; }
+            sleep 1
           done
-          echo "::error::The exploration Appium server didn't start; see appium-explore.log in the claude-output artifact."
+          echo "::error::The Sauce Labs proxy didn't start; see sauce-proxy.log in the claude-output artifact."
           exit 1
 
       - name: Implement with Claude Code
@@ -112,6 +122,8 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           SCENARIO_NAME: ${{ steps.scenario.outputs.scenario_name }}
           SCENARIO_LINE: ${{ steps.scenario.outputs.scenario_line }}
+          # Claude's test runs go through the proxy, so no Sauce Labs credentials are given to Claude
+          SAUCE_HUB_URL: http://127.0.0.1:4724
           # Unattended, Claude Code waits for background commands before exiting, so allow none,
           # and give foreground commands (a full test run takes several minutes) room to finish
           CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1'
@@ -128,9 +140,9 @@ jobs:
           - The feature file was written by a human and has already been updated; don't change it.
           - If a step is ambiguous, refers to something that doesn't exist in the app, or can't be automated, don't guess or work around it: stop and explain why.
           - Don't commit or push; the workflow does that after verifying your changes.
-          - The exploration Appium server is already running on port 4724 (the workflow started it). Use it; don't start or stop Appium.
+          - The Sauce Labs proxy is already running on port 4724 (the workflow started it). Use it for Appium MCP; don't start or stop it.
           - Run every command in the foreground.
-          - To check your work, run only the new scenario: npx wdio run ./config/wdio.ios.conf.ts --spec ./$FEATURE_FILE:$SCENARIO_LINE (don't run the full suite).
+          - To check your work, run only the new scenario: npx wdio run ./config/wdio.sauce.conf.ts --spec ./$FEATURE_FILE:$SCENARIO_LINE (don't run the full suite).
           When you're done, use the Write tool to save your report to .ai-result.md in the repository root: a short summary of the steps, page objects and selectors you added or reused and the test results, ending with exactly one line, either 'RESULT: SUCCESS' or 'RESULT: BLOCKED - <one-line reason>'."
 
           claude -p "$PROMPT" \
@@ -178,7 +190,7 @@ jobs:
 
       - name: Check what was changed
         run: |
-          npm run appium:explore:stop
+          npm run explore:stop
           if ! cmp -s "$FEATURE_FILE" "$RUNNER_TEMP/expected.feature"; then
             echo "::error::$FEATURE_FILE was modified by the AI; the scenario must stay as written."
             diff "$RUNNER_TEMP/expected.feature" "$FEATURE_FILE" || true
@@ -197,13 +209,15 @@ jobs:
         id: verify
         env:
           SCENARIO_LINE: ${{ steps.scenario.outputs.scenario_line }}
+          SAUCE_USERNAME: ${{ secrets.SAUCE_USERNAME }}
+          SAUCE_ACCESS_KEY: ${{ secrets.SAUCE_ACCESS_KEY }}
         run: |
           npm run typecheck
           # Start from clean results so the evidence only reflects these runs
           rm -rf allure-results
           for run in 1 2; do
             echo "::group::Run $run of 2: $FEATURE_FILE:$SCENARIO_LINE"
-            npx wdio run ./config/wdio.ios.conf.ts --spec "./$FEATURE_FILE:$SCENARIO_LINE"
+            npx wdio run ./config/wdio.sauce.conf.ts --spec "./$FEATURE_FILE:$SCENARIO_LINE"
             echo "::endgroup::"
           done
 
@@ -273,9 +287,9 @@ jobs:
             core.notice(`Opened ${pr.html_url}`);
             await core.summary.addRaw(`\n**Pull request:** ${pr.html_url}\n`).write();
 
-      - name: Stop exploration Appium
+      - name: Stop Sauce Labs proxy
         if: always()
-        run: npm run appium:explore:stop
+        run: npm run explore:stop
 
       - name: Upload Claude output and logs
         if: always()
@@ -286,6 +300,7 @@ jobs:
             ${{ runner.temp }}/claude.json
             ${{ runner.temp }}/test-plan.md
             ${{ runner.temp }}/scenario-review.md
+            ${{ runner.temp }}/sauce-proxy.log
             logs
             allure-results
           if-no-files-found: ignore

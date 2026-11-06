@@ -5,3 +5,4 @@ allure-report/
 .DS_Store
 apps/
 .ai-result.md
+.env

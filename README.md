@@ -1,15 +1,16 @@
 # wdio-appium-cucumber
 
-Mobile UI tests for the **Sauce Labs My Demo App (iOS)**, written as Cucumber BDD scenarios and run with WebdriverIO and Appium on an iOS simulator. New scenarios can also be implemented by AI: a tester types a scenario into a GitHub form and gets back a pull request with tested automation code.
+Mobile UI tests for the **Sauce Labs My Demo App (iOS)**, written as Cucumber BDD scenarios and run with WebdriverIO and Appium on **real iPhones at Sauce Labs**. New scenarios can also be implemented by AI: a tester types a scenario into a GitHub form and gets back a pull request with tested automation code.
 
 | | |
 |---|---|
 | Test runner | WebdriverIO 9 (`@wdio/cucumber-framework`) |
-| Automation | Appium 3 with the XCUITest driver (pinned to 11.17.7) |
+| Automation | Appium with the XCUITest driver, run by Sauce Labs (a local Appium 3 is kept for simulator runs) |
+| Devices | Sauce Labs real iPhones (region `us-west-1`); local iOS simulator optional |
 | Language | TypeScript (ESM, `.ts` import extensions) |
 | BDD | Cucumber / Gherkin |
 | Reports | Spec reporter (console) and Allure |
-| CI | GitHub Actions on a self-hosted Mac |
+| CI | GitHub Actions on a self-hosted Mac (runs WebdriverIO only) |
 | AI authoring | Claude Code with Appium MCP |
 
 ## Contents
@@ -39,20 +40,22 @@ The framework has four layers, each built on the one below:
  ├──────────────── 2. Test code (BDD) ────────────────────────────┤
  │  feature files → step definitions → page objects                │
  ├──────────────── 1. Automation engine ──────────────────────────┤
- │  WebdriverIO → Appium → XCUITest driver → iOS simulator → app   │
+ │  WebdriverIO → Sauce Labs (Appium → XCUITest) → real iPhone      │
  └─────────────────────────────────────────────────────────────────┘
 ```
 
 ### 1. Automation engine
 
-| Piece | Job |
-|---|---|
-| **WebdriverIO** | Runs the tests. Code such as `$('~AddToCart').click()` becomes a WebDriver HTTP request. |
-| **Appium** (port 4723) | Receives those requests and passes them to the right driver. Started and stopped automatically by the wdio Appium service. |
-| **XCUITest driver** | Appium's iOS driver. It installs **WebDriverAgent** on the simulator, which uses Apple's XCTest to tap, type and read the screen. |
-| **iOS simulator** | An iPhone 14 (iOS 16.4) running My Demo App (`com.saucelabs.mydemo.app.ios`). |
+| Piece | Where | Job |
+|---|---|---|
+| **WebdriverIO** | Your Mac / the CI runner | Runs the tests. Code such as `$('~AddToCart').click()` becomes a WebDriver HTTP request, sent over HTTPS to Sauce Labs. |
+| **Appium** | Sauce Labs | Receives those requests and passes them to the XCUITest driver. Sauce Labs runs it (`appiumVersion: 'latest'`); nothing is started on your Mac. |
+| **XCUITest driver + WebDriverAgent** | Sauce Labs | Uses Apple's XCTest on the device to tap, type and read the screen. |
+| **Real iPhone** | Sauce Labs | Any free iPhone (`iPhone.*`), e.g. an iPhone 13 Pro on iOS 18, running My Demo App 2.3.0 (`com.saucelabs.mydemo.app.ios`). |
 
-Before **every scenario** the app is reset (terminate → `mobile: clearApp` → activate), so each scenario starts on the catalog with an empty cart and scenarios can't affect each other.
+**Reset between scenarios.** Each scenario must start on the catalog with an empty cart. Real devices can't clear app data (`mobile: clearApp` only works on simulators), so every scenario after the first gets a **new Sauce session**, which installs the app afresh (about 15 seconds). Each scenario then appears in Sauce Labs as its own job, named "Feature: Scenario", marked passed or failed, with its own video.
+
+**Local simulator (optional).** `npm run test:local` uses `config/wdio.local.conf.ts` instead: a local Appium on port 4723, the iPhone 14 simulator, and the faster terminate → `mobile: clearApp` → activate reset.
 
 ### 2. Test code
 
@@ -74,7 +77,7 @@ Scenario: Remove a backpack from the cart
 
 ### 3 and 4. Where everything runs
 
-GitHub only queues jobs, stores secrets and hosts branches and pull requests. **Everything that touches the app runs on the self-hosted Mac.** Only Claude's model calls leave the Mac.
+GitHub only queues jobs, stores secrets and hosts branches and pull requests. The self-hosted Mac runs WebdriverIO, Claude Code and Appium MCP. **Appium and the devices are at Sauce Labs.** Appium MCP reaches Sauce Labs through a small local proxy on port 4724, which adds the credentials, so Claude never sees them.
 
 ```mermaid
 flowchart LR
@@ -84,7 +87,7 @@ flowchart LR
         pr["Pull request<br/>+ test plan"]
     end
 
-    subgraph MAC["Self-hosted Mac (macOS 13, Xcode 14.3.1)"]
+    subgraph MAC["Self-hosted Mac"]
         runner["Actions runner<br/>self-hosted-mac-mobile"]
         subgraph JOB["Workflow job"]
             scripts["Workflow scripts<br/>add-scenario · test-evidence"]
@@ -92,9 +95,12 @@ flowchart LR
             mcp["Appium MCP"]
             wdio["WebdriverIO + Cucumber"]
         end
-        a4724["Appium :4724<br/>(exploration)"]
-        a4723["Appium :4723<br/>(test runs)"]
-        sim["iOS simulator<br/>WebDriverAgent + My Demo App"]
+        proxy["Sauce Labs proxy :4724<br/>adds credentials"]
+    end
+
+    subgraph SAUCE["Sauce Labs (us-west-1)"]
+        hub["Hub + Appium"]
+        iphone["Real iPhone<br/>WebDriverAgent + My Demo App"]
     end
 
     anthropic["Anthropic API<br/>(Claude model)"]
@@ -102,8 +108,9 @@ flowchart LR
     actions -- "job" --> runner --> JOB
     repo -- "checkout" --> JOB
     claude <--> anthropic
-    claude --> mcp --> a4724 --> sim
-    wdio --> a4723 --> sim
+    claude --> mcp --> proxy -- "HTTPS + key" --> hub
+    wdio -- "HTTPS + key" --> hub
+    hub --> iphone
     JOB -- "push branch, open PR" --> pr
 ```
 
@@ -120,9 +127,14 @@ src/
   pageobjects/                One page object per screen, exported as a singleton
     base.screen.ts            Shared screen logic (waitForIsShown, isShown)
 config/
-  wdio.shared.conf.ts         Framework, reporters, Appium service, screenshot on failure
-  wdio.ios.conf.ts            iOS capabilities and the per-scenario app reset
-apps/                         My_Demo_App.app (not in git)
+  wdio.shared.conf.ts         Framework, reporters, .env loading, screenshot on failure
+  wdio.sauce.conf.ts          Sauce Labs real devices: capabilities, new session per scenario, job names/results
+  wdio.local.conf.ts          Local simulator: Appium service, capabilities, clearApp reset
+scripts/
+  sauce-proxy.mjs             Port-4724 proxy to Sauce Labs for Appium MCP (adds the credentials)
+  sauce-upload.mjs            Uploads My Demo App to Sauce Labs app storage
+apps/                         My_Demo_App.app for local simulator runs (not in git)
+.env                          Your Sauce Labs credentials (not in git)
 .github/
   workflows/
     mobile-tests.yml          Regression run on every push to main
@@ -138,7 +150,7 @@ apps/                         My_Demo_App.app (not in git)
 CLAUDE.md                     Conventions and limitations Claude Code follows
 ```
 
-The `.mjs` files are plain JavaScript modules that Node runs directly with no build step. They are CI tooling, not tests. They use the same Cucumber libraries as the test run (`@cucumber/gherkin`, `@cucumber/cucumber-expressions`).
+The `.mjs` files are plain JavaScript modules that Node runs directly with no build step. They are tooling, not tests. The ones in `.github/scripts/` use the same Cucumber libraries as the test run (`@cucumber/gherkin`, `@cucumber/cucumber-expressions`).
 
 ---
 
@@ -146,9 +158,9 @@ The `.mjs` files are plain JavaScript modules that Node runs directly with no bu
 
 ### Prerequisites
 
-- macOS with **Xcode 14.3.1** and the **iPhone 14** simulator (iOS 16.4)
 - **Node.js 22**
-- **My Demo App** for the simulator (an x86_64-capable build), copied to `apps/My_Demo_App.app`, or set `IOS_APP=/path/to/My_Demo_App.app`. The app is not checked in.
+- A **Sauce Labs account** with real-device access. Its username and access key are in Sauce Labs under the profile menu → **User settings**.
+- Only for local simulator runs: Xcode 14.3.1 with the iPhone 14 simulator, and a simulator build of My Demo App in `apps/My_Demo_App.app` (or set `IOS_APP`).
 
 ### Install
 
@@ -156,37 +168,57 @@ The `.mjs` files are plain JavaScript modules that Node runs directly with no bu
 git clone https://github.com/regisrozario/wdio-appium-cucumber.git
 cd wdio-appium-cucumber
 npm install
-npm run appium:doctor     # optional: checks the XCUITest driver's requirements
 ```
 
-Appium and the XCUITest driver are project dependencies, so nothing has to be installed globally. **You don't need to start Appium yourself.**
+### Sauce Labs credentials and app
+
+Create a `.env` file in the project root. It's git-ignored, so the credentials stay on your machine:
+
+```bash
+SAUCE_USERNAME=your-sauce-username
+SAUCE_ACCESS_KEY=your-access-key
+# SAUCE_REGION=us-west-1          # default; or us-east-4, eu-central-1
+```
+
+Upload the app to your Sauce Labs app storage once. This downloads My Demo App 2.3.0 (`SauceLabs-Demo-App.ipa`) from GitHub and uploads it:
+
+```bash
+npm run sauce:upload
+```
+
+Run it again whenever you want a newer build; the newest upload with that name is used.
 
 ---
 
 ## Running the tests
 
 ```bash
-npm test                                                                  # all scenarios
-npm run test:smoke                                                        # @smoke only
-TAGS='@checkout' npm test                                                 # by tag expression
-npx wdio run ./config/wdio.ios.conf.ts --spec ./features/cart.feature     # one feature file
-npx wdio run ./config/wdio.ios.conf.ts --spec ./features/cart.feature:44  # one scenario (line of "Scenario:")
+npm test                                                                    # all scenarios, on Sauce Labs
+npm run test:smoke                                                          # @smoke only
+TAGS='@checkout' npm test                                                   # by tag expression
+npx wdio run ./config/wdio.sauce.conf.ts --spec ./features/cart.feature     # one feature file
+npx wdio run ./config/wdio.sauce.conf.ts --spec ./features/cart.feature:11  # one scenario (line of "Scenario:")
+npm run test:local                                                          # all scenarios, on the local simulator
 ```
 
-The simulator boots and the app opens by itself. The first run takes a few minutes longer while WebDriverAgent is built.
+The full suite takes about 5 minutes on Sauce Labs. Watch the runs live, with video, at [app.saucelabs.com](https://app.saucelabs.com) → Automated → Real Devices.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `IOS_DEVICE` | `iPhone 14` | Simulator name |
-| `IOS_VERSION` | (any) | iOS version, e.g. `16.4` |
-| `IOS_APP` | `apps/My_Demo_App.app` | Path to the app; if missing, the app already installed on the simulator is used |
+| `IOS_DEVICE` | Sauce: `iPhone.*` · local: `iPhone 14` | Device name. On Sauce Labs a regular expression, e.g. `iPhone 1[3-5].*` |
+| `IOS_VERSION` | (any) | iOS version, e.g. `18` |
+| `SAUCE_REGION` | `us-west-1` | Sauce Labs data center |
+| `SAUCE_APP` | `storage:filename=SauceLabs-Demo-App.ipa` | App in Sauce Labs storage |
+| `SAUCE_BUILD` | `Local run <date time>` | Build name grouping the jobs in Sauce Labs |
+| `IOS_APP` | `apps/My_Demo_App.app` | Local runs only: path to the simulator build |
 | `TAGS` | (all) | Cucumber tag expression |
 
-### Checks without the simulator
+### Checks without a device
 
 ```bash
-npm run typecheck      # TypeScript errors
-npm run test:dry-run   # undefined steps print: Step "..." is not defined
+npm run typecheck                          # TypeScript errors
+npm run test:dry-run                       # every scenario's steps have definitions
+npm run test:dry-run -- features/x.feature # one file; undefined steps are marked "Undefined." with a code snippet
 ```
 
 ### Reports and logs
@@ -195,7 +227,7 @@ npm run test:dry-run   # undefined steps print: Step "..." is not defined
 npm run report         # builds and opens the Allure report
 ```
 
-Screenshots of failed steps are attached to the Allure report. Appium and WebdriverIO logs are in `logs/`.
+Each scenario in the Allure report links to its Sauce Labs job (video, device logs), and failed steps have a screenshot. WebdriverIO logs are in `logs/`.
 
 ### Editor support
 
@@ -250,17 +282,17 @@ The AI workflow enforces these rules on new scenarios (see [Scenario review](#sc
 
 `.github/workflows/mobile-tests.yml` is the regression run. It has no AI involved.
 
-- **Triggers:** every push to `main` (including merged AI pull requests), or **Run workflow** with an optional tag expression (e.g. `@smoke`) and simulator name.
-- **Runs on:** the self-hosted Mac (`[self-hosted, macOS]`), with a 60-minute limit.
-- **Steps:** check out → Node.js 22 → `npm ci` → type check → `npm test` → generate the Allure report → upload the report and logs as artifacts.
+- **Triggers:** every push to `main` (including merged AI pull requests), or **Run workflow** with an optional tag expression (e.g. `@smoke`) and Sauce device name.
+- **Runs on:** the self-hosted Mac (`[self-hosted, macOS]`), with a 60-minute limit. The Mac only runs WebdriverIO; the tests run on Sauce Labs real iPhones.
+- **Steps:** check out → Node.js 22 → `npm ci` → type check → check the Sauce credentials → `npm test` → generate the Allure report → upload the report and logs as artifacts.
 
-The first run takes about 6 minutes, mostly building WebDriverAgent. The suite itself takes a few minutes.
+The jobs appear in Sauce Labs under the build "Mobile tests (iOS) #\<run number\>". The suite takes about 5 minutes.
 
 ---
 
 ## AI: Implement scenario (AI)
 
-A tester types one Gherkin scenario into a GitHub form. About 10 to 30 minutes later there is a pull request with step definitions and page objects, written by Claude Code after exploring the app through **Appium MCP**. **No pull request is opened unless the new scenario passes twice in a row** on the simulator.
+A tester types one Gherkin scenario into a GitHub form. About 10 to 30 minutes later there is a pull request with step definitions and page objects, written by Claude Code after exploring the app through **Appium MCP**. **No pull request is opened unless the new scenario passes twice in a row** on Sauce Labs real iPhones.
 
 ### Starting a run
 
@@ -292,14 +324,14 @@ flowchart TD
     subgraph MAC["Self-hosted Mac"]
         resolve["1. Resolve feature file"] --> setup["2–5. Checkout · Node.js · npm ci · install Claude Code"]
         setup --> add["6. Add scenario<br/>BDD review + Gherkin check"]
-        add --> explore["7. Start exploration Appium :4724"]
-        explore --> claude["8. Claude Code implements<br/>(Appium MCP, max 45 min)"]
+        add --> explore["7. Start Sauce Labs proxy :4724"]
+        explore --> claude["8. Claude Code implements<br/>(Appium MCP via proxy, max 45 min)"]
         claude --> result["9. Check Claude's result<br/>RESULT: SUCCESS?"]
         result --> changed["10. Check what was changed<br/>scenario unchanged · allowed files only"]
-        changed --> verify["11. Type check + new scenario, run twice<br/>(Appium :4723)"]
+        changed --> verify["11. Type check + new scenario, run twice<br/>(on Sauce Labs)"]
         verify --> plan["12. Build test plan<br/>2 of 2 runs passed?"]
         plan --> push["13. Push branch ai/&lt;feature&gt;-&lt;run&gt;"]
-        always["15–16. Stop Appium :4724 · upload claude-output (always)"]
+        always["15–16. Stop proxy · upload claude-output (always)"]
     end
 
     push --> openpr["14. Open pull request on GitHub"]
@@ -320,7 +352,7 @@ The job has 16 steps and a 90-minute limit. Steps 1 to 14 stop at the first fail
 1. **Resolve feature file.** Takes the dropdown choice, or the `new_feature_file` path when "New feature file…" is chosen.
 2. **Check out code** from the branch the workflow was started from.
 3. **Set up Node.js 22.**
-4. **Install dependencies** (`npm ci`): Appium, the XCUITest driver, WebdriverIO and Cucumber, into the job's own folder.
+4. **Install dependencies** (`npm ci`): WebdriverIO, Cucumber and the other tools, into the job's own folder.
 5. **Install Claude Code**, pinned to version 2.1.81.
 6. **Add scenario to feature file** (`add-scenario.mjs`):
    - splits the input on ` | `
@@ -329,21 +361,21 @@ The job has 16 steps and a 90-minute limit. Steps 1 to 14 stop at the first fail
    - appends it to the feature file, or creates the file
 
    A copy of the feature file is kept for step 10.
-7. **Start exploration Appium** on port 4724 and wait until it's ready. The workflow owns this server, so Claude never starts or stops it.
+7. **Start the Sauce Labs proxy** on port 4724 (`npm run explore`) and wait until it's ready. Only this step gets the Sauce credentials. The workflow owns the proxy, so Claude never starts or stops it.
 8. **Implement with Claude Code.** Runs `claude -p` headless, with a 45-minute limit, using the `/implement-feature` skill and the rules in `CLAUDE.md`. Claude:
    1. runs a dry run to list the undefined steps
-   2. explores the app through Appium MCP: reads screens, generates locators, taps and scrolls, and confirms each selector
+   2. explores the app through Appium MCP on a Sauce Labs iPhone: reads screens, generates locators, taps and scrolls, and confirms each selector
    3. writes page objects and step definitions under `src/`
-   4. runs the type check, then runs the new scenario and fixes it until it passes
+   4. runs the type check, then runs the new scenario (through the proxy, `SAUCE_HUB_URL`) and fixes it until it passes
    5. writes its report to `.ai-result.md`, ending in `RESULT: SUCCESS` or `RESULT: BLOCKED - <reason>`
 9. **Check Claude's result.** Any result other than `RESULT: SUCCESS` fails the run. Turns, cost and any refused tools are added to the run summary.
-10. **Check what was changed.** Stops the exploration server. Then confirms the scenario text is unchanged and that only `src/`, that feature file and `CLAUDE.md` changed.
-11. **Verify.** Runs `npm run typecheck`, clears old results, and runs **only the new scenario, twice** (`--spec <feature>:<line>`). The wdio Appium service uses port 4723.
+10. **Check what was changed.** Stops the proxy. Then confirms the scenario text is unchanged and that only `src/`, that feature file and `CLAUDE.md` changed.
+11. **Verify.** Runs `npm run typecheck`, clears old results, and runs **only the new scenario, twice** (`--spec <feature>:<line>`) on Sauce Labs, with the credentials given to this step only.
 12. **Build test plan** (`test-evidence.mjs`). Reads the Allure results and requires **2 of 2 runs passed, with every step passed**.
 13. **Push branch** `ai/<feature>-<run number>`, committed as github-actions[bot].
 14. **Open pull request.**
-15. **Stop exploration Appium** (always).
-16. **Upload the `claude-output` artifact** (always): Claude's output, the test plan, the scenario review, logs and Allure results.
+15. **Stop the Sauce Labs proxy** (always).
+16. **Upload the `claude-output` artifact** (always): Claude's output, the test plan, the scenario review, the proxy log, logs and Allure results.
 
 ### Scenario review
 
@@ -377,8 +409,9 @@ Steps 1 and 6 run before Claude starts, so bad input costs nothing. The verifica
 
 ### Guardrails for unattended Claude
 
+- **No credentials for Claude.** The Sauce credentials go only to the proxy step and the verification step. Claude reaches Sauce Labs only through the proxy, for both exploration and its own test runs.
 - **Tool allowlist.** Claude can only read and edit files, use Appium MCP, and run the dry run, the type check, `npx wdio run`, the port-4724 status check, and `git status` / `git diff`. It can't push, install packages or run anything else.
-- **`CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`.** A headless `claude -p` waits for background commands before exiting. A forgotten background Appium server once kept a run idle for 20+ minutes. With this setting every command runs in the foreground, so nothing can be left behind.
+- **`CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`.** A headless `claude -p` waits for background commands before exiting. A forgotten background server once kept a run idle for 20+ minutes. With this setting every command runs in the foreground, so nothing can be left behind.
 - **`BASH_DEFAULT_TIMEOUT_MS=900000` and `BASH_MAX_TIMEOUT_MS=1800000`** give foreground test runs up to 15 minutes (30 on request), instead of the default 2.
 - **The report goes to a file** (`.ai-result.md`), so late messages can't replace the `RESULT:` line.
 
@@ -397,14 +430,17 @@ The pull request is titled "Implement scenario: \<name\>" and its description co
 
 Only the new scenario runs in this workflow. The **full suite** runs in Mobile tests (iOS) after the merge to `main`. Reviewers check the selectors and steps before merging; nothing reaches `main` without that review.
 
-### The two Appium servers
+### Ports and servers
 
-| Port | Started by | Used for | When |
+| Port | What | Started by | Used for |
 |---|---|---|---|
-| 4724 | `npm run appium:explore` (the workflow, or you locally) | Appium MCP exploration | AI workflow steps 7–10, or local exploration |
-| 4723 | The wdio Appium service inside each test run | Running the tests | Every test run |
+| 4724 | Sauce Labs proxy (`npm run explore`) | The AI workflow (steps 7–10), or the `/implement-feature` skill locally | Appium MCP exploration, and Claude's test runs in CI |
+| 4724 | Local Appium (`npm run explore:local`) | You, by hand | Exploring the local simulator instead |
+| 4723 | Local Appium (wdio Appium service) | `npm run test:local` | Local simulator runs only |
 
-Both workflows use the concurrency group `ios-simulator`, so only one job uses the simulator at a time and a second run waits in the queue.
+`npm test` doesn't use a local port: WebdriverIO talks to Sauce Labs directly.
+
+Both workflows use the concurrency group `sauce-labs`, so only one job uses Sauce devices at a time (plans limit concurrent devices) and a second run waits in the queue.
 
 ### Implementing locally with Claude Code
 
@@ -414,17 +450,19 @@ In a Claude Code session in this project, run:
 /implement-feature features/cart.feature
 ```
 
-Claude follows the same loop: dry run, explore, write code, run until it passes. You watch it work, and nothing is committed unless you ask. Locally, the skill starts the exploration server (`npm run appium:explore`) itself and stops it when done (`npm run appium:explore:stop`).
+Claude follows the same loop: dry run, explore, write code, run until it passes. You watch it work, and nothing is committed unless you ask. Locally, the skill starts the Sauce Labs proxy (`npm run explore`) itself, using your `.env`, and stops it when done (`npm run explore:stop`).
 
-Appium MCP is registered in `.mcp.json` (`appium-mcp@1.99.2`). It runs in **remote mode** against the project's own Appium on port 4724, because its embedded driver doesn't build on this Mac. `CLAUDE.md` has the exact session settings.
+Appium MCP is registered in `.mcp.json` (`appium-mcp@1.99.2`). It runs in **remote mode** against `http://127.0.0.1:4724`. For sessions Appium MCP creates, the proxy replaces the requested device and app with the project's Sauce Labs ones (a real iPhone with My Demo App), and gives them 10 minutes between commands. `CLAUDE.md` has the exact session settings.
 
 ---
 
 ## One-time setup for CI
 
-The AI workflow needs three settings before its first run. The regression workflow needs only the runner.
+Both workflows need the runner and the Sauce Labs secrets. The AI workflow also needs the Anthropic key and the pull request permission.
 
-- [ ] Add the repository secret **`ANTHROPIC_API_KEY`** (Settings → Secrets and variables → Actions). Without it, the run stops at step 8.
+- [ ] Add the repository secrets **`SAUCE_USERNAME`** and **`SAUCE_ACCESS_KEY`** (Settings → Secrets and variables → Actions). If your account isn't in US West, also add the repository **variable** `SAUCE_REGION` (`us-east-4` or `eu-central-1`).
+- [ ] Upload the app to Sauce Labs once: `npm run sauce:upload` on any machine with the credentials in `.env`.
+- [ ] Add the repository secret **`ANTHROPIC_API_KEY`**. Without it, the AI run stops at step 8.
 - [ ] Under Settings → Actions → General → Workflow permissions:
   - choose **Read and write permissions**
   - tick **Allow GitHub Actions to create and approve pull requests**
@@ -436,7 +474,7 @@ The AI workflow needs three settings before its first run. The regression workfl
   ```
   Otherwise, start it from a terminal with `./run.sh`.
 
-The Mac needs Xcode with the iPhone 14 simulator and Node.js. It must stay logged in and awake; a sleeping Mac leaves jobs queued.
+The Mac needs only Node.js (Xcode only for local simulator runs). It must stay logged in and awake; a sleeping Mac leaves jobs queued.
 
 Keep the repository **private**. Anyone who can start a workflow can run code on that Mac.
 
@@ -446,15 +484,17 @@ Keep the repository **private**. Anyone who can start a workflow can run code on
 
 | Limitation | Effect | Workaround today |
 |---|---|---|
-| The software keyboard can't be dismissed on the iOS 16.4 simulator (Return, swipes, `hideKeyboard`, backgrounding all fail) | The Login and To Payment buttons stay covered after typing | Login uses the app's built-in username list (`bob@example.com` / `10203040`); checkout stops after login |
+| The software keyboard can't be dismissed on the local iOS 16.4 simulator (Return, swipes, `hideKeyboard`, backgrounding all fail); not yet checked on Sauce real devices | The Login and To Payment buttons stay covered after typing | Login uses the app's built-in username list (`bob@example.com` / `10203040`); checkout stops after login |
+| Real devices can't clear app data | Each scenario needs a new Sauce session | A new session per scenario (about 15 s each), set up in `wdio.sauce.conf.ts` |
+| Sauce assigns any free iPhone matching `iPhone.*` | Model and iOS version can differ between scenarios | Narrow `IOS_DEVICE` / `IOS_VERSION` if a scenario depends on them |
 | The catalog loads lazily (about 6 products exist until you scroll) | `scrollIntoView` and `mobile: scroll` without an element don't move the grid | `mobile: scroll` with the CollectionView's `elementId` (see `CatalogScreen.openProduct`) |
 | One-line scenario input | No data tables or Scenario Outlines | Add those scenarios by hand |
 | Fixed dropdown list | New feature files don't appear automatically | `npm run sync:feature-choices` after merging |
-| macOS 13 with Xcode 14.3.1 | XCUITest driver pinned to 11.17.7, because newer versions don't build; appium-mcp's native module doesn't build | Don't upgrade the driver; Appium MCP runs in remote mode |
+| macOS 13 with Xcode 14.3.1 (local simulator runs) | XCUITest driver pinned to 11.17.7, because newer versions don't build; appium-mcp's native module doesn't build | Don't upgrade the driver; Appium MCP runs in remote mode |
 | Claude Code pinned to 2.1.81 in CI | Newer versions aren't picked up | Raise the pin in the workflow after testing |
 | Only new scenarios are reviewed | Existing scenarios aren't checked against the BDD rules | Fix them by hand |
 
-**Cost.** Each AI run calls the Anthropic API. A short headless check cost about $0.06. A full implementation is expected to cost a few dollars and take 10 to 30 minutes. The actual cost of each run is shown in its run summary.
+**Cost.** Test runs use Sauce Labs device minutes: the full suite takes about 5 minutes, and each AI run adds exploration time plus two runs of the new scenario. Each AI run also calls the Anthropic API. A short headless check cost about $0.06. A full implementation is expected to cost a few dollars and take 10 to 30 minutes. The actual cost of each run is shown in its run summary.
 
 ---
 
@@ -462,11 +502,13 @@ Keep the repository **private**. Anyone who can start a workflow can run code on
 
 | Symptom | Fix |
 |---|---|
-| `Step "..." is not defined` | Add the step definition, or reword the scenario to match an existing step |
+| A step is marked `Undefined.` in the dry run | Add the step definition, or reword the scenario to match an existing step |
+| `Missing credentials` / 401 from Sauce Labs | Check `SAUCE_USERNAME` and `SAUCE_ACCESS_KEY` in `.env` (locally) or the repository secrets (CI), and `SAUCE_REGION` |
+| Sauce Labs can't find the app | Run `npm run sauce:upload` |
+| A Sauce run waits a long time before starting | No matching device is free; widen `IOS_DEVICE` or wait. Sessions time out after 5 minutes |
 | "Undefined step" warnings in VS Code, but the dry run passes | Reload the window; the Cucumber extension reads `.vscode/settings.json` |
-| Port 4723 or 4724 already in use | `lsof -ti tcp:4723 \| xargs kill`, or `npm run appium:explore:stop` for 4724 |
-| App not installed / not found | Copy it to `apps/My_Demo_App.app` or set `IOS_APP` |
-| First run is slow | WebDriverAgent is being built; later runs reuse it |
-| Local and CI runs interfere | Don't run tests locally while a GitHub job is running on the same Mac; they share the simulator |
+| Port 4724 already in use | `npm run explore:stop` |
+| Local simulator: app not found | Copy it to `apps/My_Demo_App.app` or set `IOS_APP` |
+| Local simulator: first run is slow | WebDriverAgent is being built; later runs reuse it |
 | AI run fails with a 403 when opening the PR | Enable the workflow permission in [One-time setup for CI](#one-time-setup-for-ci) |
 | AI run fails at "Add scenario" | Read the scenario review in the run summary; fix the scenario and run again |

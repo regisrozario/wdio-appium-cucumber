@@ -55,7 +55,7 @@ const md = [
     `- [x] Scenario text in \`${FEATURE_FILE}\` is unchanged from the workflow input`,
     '- [x] Only step definitions, page objects, the feature file and `CLAUDE.md` were changed',
     '- [x] Type check passed (`npm run typecheck`)',
-    `- [${ok ? 'x' : ' '}] New scenario **${SCENARIO_NAME}** passed ${passedRuns} of ${REQUIRED_RUNS} consecutive runs, every step passed (\`--spec ${spec}\` on the iOS simulator)`,
+    `- [${ok ? 'x' : ' '}] New scenario **${SCENARIO_NAME}** passed ${passedRuns} of ${REQUIRED_RUNS} consecutive runs, every step passed (\`--spec ${spec}\` on a Sauce Labs real iPhone)`,
     '',
     `### New scenario: ${SCENARIO_NAME}`,
     '',

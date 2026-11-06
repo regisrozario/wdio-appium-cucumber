@@ -10,27 +10,28 @@ on:
         required: false
         default: ''
       device:
-        description: 'Simulator name'
+        description: 'Sauce Labs real device name; regular expressions allowed, e.g. "iPhone 1[3-5].*"'
         required: false
-        default: 'iPhone 14'
+        default: 'iPhone.*'
 
-# One simulator, so never run two jobs at once
+# Sauce Labs plans limit concurrent devices, so run one device job at a time
 concurrency:
-  group: ios-simulator
+  group: sauce-labs
   cancel-in-progress: false
 
 jobs:
   ios:
-    # Runs on the Mac registered as a self-hosted runner, where Xcode and the simulators live
+    # The self-hosted Mac only runs WebdriverIO; Appium and the iPhones are at Sauce Labs
     runs-on: [self-hosted, macOS]
     timeout-minutes: 60
 
     env:
       TAGS: ${{ github.event.inputs.tags }}
-      IOS_DEVICE: ${{ github.event.inputs.device || 'iPhone 14' }}
-      # Path to the My Demo App build on the runner Mac (repo variable). If unset,
-      # the app must already be installed on the simulator.
-      IOS_APP: ${{ vars.IOS_APP_PATH }}
+      IOS_DEVICE: ${{ github.event.inputs.device || 'iPhone.*' }}
+      SAUCE_USERNAME: ${{ secrets.SAUCE_USERNAME }}
+      SAUCE_ACCESS_KEY: ${{ secrets.SAUCE_ACCESS_KEY }}
+      SAUCE_REGION: ${{ vars.SAUCE_REGION || 'us-west-1' }}
+      SAUCE_BUILD: 'Mobile tests (iOS) #${{ github.run_number }}'
 
     steps:
       - name: Check out code
@@ -47,6 +48,13 @@ jobs:
 
       - name: Type check
         run: npm run typecheck
+
+      - name: Check Sauce Labs credentials
+        run: |
+          if [ -z "$SAUCE_USERNAME" ] || [ -z "$SAUCE_ACCESS_KEY" ]; then
+            echo "::error::Add SAUCE_USERNAME and SAUCE_ACCESS_KEY repository secrets (Settings → Secrets and variables → Actions)."
+            exit 1
+          fi
 
       - name: Run tests
         run: npm test
