@@ -24,3 +24,7 @@ Then('make sure items are sorted properly', async () => {
     await CatalogScreen.openSortMenu();
     await expect(CatalogScreen.sortOption('Price - Descending')).toHaveAttribute('value', '1');
 });
+
+When('I change the sort option to {string}', async (label: string) => {
+    await CatalogScreen.sortBy(label);
+});

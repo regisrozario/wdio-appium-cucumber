@@ -43,6 +43,30 @@ function newSessionBody(body) {
     return { capabilities: { alwaysMatch: explorationCapabilities, firstMatch: [{}] } };
 }
 
+// Sauce Labs ends a real-device session after 90 s without a command (sauce:options idleTimeout doesn't change
+// that), and Claude often thinks for longer between commands. So while a client keeps using a session, a light
+// command every 30 s keeps it open; after 30 minutes without client commands it's left to time out.
+const KEEPALIVE_MS = 30_000;
+const ABANDONED_MS = 30 * 60_000;
+const sessions = new Map(); // session id → { lastUsed, timer }
+
+function forget(id) {
+    clearInterval(sessions.get(id)?.timer);
+    sessions.delete(id);
+}
+
+function keepAlive(id) {
+    const session = { lastUsed: Date.now() };
+    session.timer = setInterval(() => {
+        if (Date.now() - session.lastUsed > ABANDONED_MS) return forget(id);
+        https.request(`${upstream}/session/${id}/timeouts`, { headers: { authorization, accept: 'application/json' } }, (res) => {
+            res.resume();
+            if (res.statusCode === 404) forget(id);
+        }).on('error', () => {}).end();
+    }, KEEPALIVE_MS);
+    sessions.set(id, session);
+}
+
 const reply = (res, status, value) => {
     res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify({ value }));
@@ -58,7 +82,11 @@ const server = http.createServer(async (req, res) => {
     const chunks = [];
     for await (const chunk of req) chunks.push(chunk);
     let body = Buffer.concat(chunks);
-    if (req.method === 'POST' && /^\/session\/?$/.test(path)) {
+    const sessionId = path.match(/^\/session\/([^/]+)/)?.[1];
+    if (sessionId && sessions.has(sessionId)) sessions.get(sessionId).lastUsed = Date.now();
+    if (req.method === 'DELETE' && sessionId && path === `/session/${sessionId}`) forget(sessionId);
+    const isNewSession = req.method === 'POST' && /^\/session\/?$/.test(path);
+    if (isNewSession) {
         try {
             body = Buffer.from(JSON.stringify(newSessionBody(JSON.parse(body.toString() || '{}'))));
         } catch {
@@ -75,9 +103,18 @@ const server = http.createServer(async (req, res) => {
             'content-type': 'application/json; charset=utf-8',
             'content-length': body.length,
         },
-    }, (upstreamRes) => {
+    }, async (upstreamRes) => {
         res.writeHead(upstreamRes.statusCode ?? 502, upstreamRes.headers);
-        upstreamRes.pipe(res);
+        if (!isNewSession) return upstreamRes.pipe(res);
+        // Read the new session's id so it can be kept alive
+        const parts = [];
+        for await (const part of upstreamRes) parts.push(part);
+        const response = Buffer.concat(parts);
+        try {
+            const id = JSON.parse(response.toString()).value?.sessionId;
+            if (id) keepAlive(id);
+        } catch { /* not JSON: nothing to keep alive */ }
+        res.end(response);
     });
     forwarded.on('error', (error) => reply(res, 502, { error: 'unknown error', message: `Sauce Labs proxy: ${error.message}` }));
     forwarded.end(body);

@@ -52,7 +52,7 @@ Tests run on **real iPhones at Sauce Labs** (region `us-west-1`): WebdriverIO ru
 2. Create a session with `appium_session_management`: `action=create`, `platform=ios`, `remoteServerUrl=http://127.0.0.1:4724`, capabilities
    `{"appium:automationName":"XCUITest","appium:deviceName":"iPhone","appium:bundleId":"com.saucelabs.mydemo.app.ios"}`.
    The proxy replaces the device and app with the project's Sauce Labs ones. Don't call `select_device` or `prepare_ios_simulator`.
-3. Explore with `appium_get_page_source`, `generate_locators`, `appium_find_element`, `appium_gesture`, `appium_alert`. To start fresh, delete the session and create a new one: `appium_app_lifecycle` `clear` doesn't work on real devices. A session ends after 10 minutes without commands.
+3. Explore with `appium_get_page_source`, `generate_locators`, `appium_find_element`, `appium_gesture`, `appium_alert`. To start fresh, delete the session and create a new one: `appium_app_lifecycle` `clear` doesn't work on real devices. Sauce Labs ends real-device sessions after 90 s without a command; the proxy keeps open sessions alive, for up to 30 minutes without commands.
 4. Write the code yourself following the conventions above. **Don't use `appium_generate_tests`**; it emits Java/TestNG.
 5. Delete the MCP session when done, and, if you started it, stop the proxy (`npm run explore:stop`). Never leave a background command running: a non-interactive `claude -p` run waits for it and never exits.
 

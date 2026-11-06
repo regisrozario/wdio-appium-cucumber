@@ -55,3 +55,11 @@ Feature: Shopping cart
     Then different sorting options displayed like name and price
     And user click on sort by price Descending
     Then make sure items are sorted properly
+  
+  @smoke
+  Scenario: Rate the onesie after changing its quantity
+    When I change the sort option to "Name - Descending"
+    And I open the product "Sauce Labs Onesie"
+    And I increase the quantity to 5
+    And I give the product a rating of 5 stars
+    Then make sure "Thank you for submitting your review!" message is displayed
